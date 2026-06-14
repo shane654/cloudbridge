@@ -7,14 +7,13 @@ import '../../core/api/device_api.dart';
 import '../../core/models/device.dart';
 
 class DeviceListProvider extends ChangeNotifier {
-  final DeviceApi _api;
+  DeviceApi _api;
 
   List<Device> _devices = [];
   bool _isLoading = false;
   String? _error;
 
-  DeviceListProvider({required String serverUrl})
-      : _api = DeviceApi(baseUrl: serverUrl);
+  DeviceListProvider({required String baseUrl}) : _api = DeviceApi(baseUrl: baseUrl);
 
   List<Device> get devices => _devices;
   bool get isLoading => _isLoading;
@@ -38,10 +37,15 @@ class DeviceListProvider extends ChangeNotifier {
   }
 
   /// Update the server URL and refresh.
-  void updateServerUrl(String url) {
-    _api.dispose(); // Close old client
-    // Note: we can't reassign _api since it's final.
-    // In a real app, we'd use a factory pattern. For MVP, the provider
-    // is recreated when settings change.
+  void updateBaseUrl(String baseUrl) {
+    _api.dispose();
+    _api = DeviceApi(baseUrl: baseUrl);
+    refresh();
+  }
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
   }
 }

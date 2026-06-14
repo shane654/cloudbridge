@@ -35,6 +35,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
+  void didUpdateWidget(SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentServerUrl != widget.currentServerUrl) {
+      _serverUrlController.text = widget.currentServerUrl;
+    }
+    if (oldWidget.currentRelayUrl != widget.currentRelayUrl) {
+      _relayUrlController.text = widget.currentRelayUrl;
+    }
+  }
+
+  @override
   void dispose() {
     _serverUrlController.dispose();
     _relayUrlController.dispose();
@@ -42,17 +53,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_url', _serverUrlController.text);
-    await prefs.setString('relay_url', _relayUrlController.text);
+    final serverUrl = _serverUrlController.text.trim();
+    final relayUrl = _relayUrlController.text.trim();
 
-    widget.onServerUrlChanged(_serverUrlController.text);
-    widget.onRelayUrlChanged(_relayUrlController.text);
+    if (serverUrl.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('server_url', serverUrl);
+    await prefs.setString('relay_url', relayUrl);
+
+    // Also save the HTTP URL derived from WebSocket URL
+    final httpUrl = serverUrl
+        .replaceFirst('ws://', 'http://')
+        .replaceFirst('wss://', 'https://')
+        .replaceAll('/signal', '');
+    await prefs.setString('http_url', httpUrl);
+
+    widget.onServerUrlChanged(serverUrl);
+    widget.onRelayUrlChanged(relayUrl);
 
     setState(() => _saved = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('设置已保存')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('设置已保存，请返回设备页刷新')),
+      );
+    }
   }
 
   @override
@@ -65,6 +90,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Connection guide
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('快速开始', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text('1. 在服务器上启动 cloudbridge-server'),
+                  Text('2. 在远程设备上启动 cloudbridge-agent'),
+                  Text('3. 在下方填写服务器 IP 地址'),
+                  Text('4. 返回设备页刷新即可看到在线设备'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
           // Server section
           Text(
             '服务器配置',
@@ -80,6 +130,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               hintText: 'ws://192.168.1.100:10980/signal',
               prefixIcon: Icon(Icons.dns),
               border: OutlineInputBorder(),
+              helperText: 'WebSocket 地址，包含端口号和 /signal 路径',
             ),
           ),
           const SizedBox(height: 16),
@@ -90,6 +141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               hintText: '192.168.1.100:10988',
               prefixIcon: Icon(Icons.swap_horiz),
               border: OutlineInputBorder(),
+              helperText: '仅填 IP:端口，不含协议前缀',
             ),
           ),
           const SizedBox(height: 24),
@@ -101,7 +153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (_saved) ...[
             const SizedBox(height: 8),
             Text(
-              '设置已保存，请重新连接',
+              '设置已保存，请返回设备页刷新',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.green,
                   ),

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/connection/connection_manager.dart';
 import 'core/signal/signal_client.dart';
 import 'features/devices/device_list_screen.dart';
+import 'features/devices/device_list_provider.dart';
 import 'features/settings/settings_screen.dart';
 
 void main() {
@@ -19,9 +20,9 @@ class CloudBridgeApp extends StatefulWidget {
 }
 
 class _CloudBridgeAppState extends State<CloudBridgeApp> {
-  String _serverUrl = 'ws://localhost:10980/signal';
-  String _relayUrl = 'localhost:10988';
-  String _httpUrl = 'http://localhost:10980';
+  String _serverUrl = 'ws://54.39.49.63:10985/signal';
+  String _relayUrl = '54.39.49.63:10988';
+  String _httpUrl = 'http://54.39.49.63:10985';
   late SignalClient _signalClient;
   late ConnectionManager _connectionManager;
   bool _initialized = false;
@@ -48,20 +49,28 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
   }
 
   void _onServerUrlChanged(String url) {
+    // Derive HTTP URL from WebSocket URL
+    String httpUrl = url
+        .replaceFirst('ws://', 'http://')
+        .replaceFirst('wss://', 'https://')
+        .replaceAll('/signal', '');
+
     setState(() {
       _serverUrl = url;
-      _httpUrl = url
-          .replaceFirst('ws://', 'http://')
-          .replaceFirst('wss://', 'https://')
-          .replaceAll('/signal', '');
+      _httpUrl = httpUrl;
     });
+
+    // Reconnect signal client with new URL
     _signalClient.disconnectClient();
     _signalClient = SignalClient(serverUrl: _serverUrl);
     _connectionManager = ConnectionManager(signalClient: _signalClient);
+    _connectionManager.setRelayAddress(_relayUrl);
   }
 
   void _onRelayUrlChanged(String url) {
-    setState(() => _relayUrl = url);
+    setState(() {
+      _relayUrl = url;
+    });
     _connectionManager.setRelayAddress(url);
   }
 
@@ -79,7 +88,6 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
       providers: [
         Provider<SignalClient>.value(value: _signalClient),
         Provider<ConnectionManager>.value(value: _connectionManager),
-        Provider<String>.value(value: _httpUrl),
       ],
       child: MaterialApp(
         title: '云桥 CloudBridge',
@@ -90,13 +98,13 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
           brightness: Brightness.dark,
         ),
         home: _HomePage(
-          serverUrl: _httpUrl,
           signalClient: _signalClient,
           connectionManager: _connectionManager,
+          httpUrl: _httpUrl,
+          serverUrl: _serverUrl,
+          relayUrl: _relayUrl,
           onServerUrlChanged: _onServerUrlChanged,
           onRelayUrlChanged: _onRelayUrlChanged,
-          currentServerUrl: _serverUrl,
-          currentRelayUrl: _relayUrl,
         ),
       ),
     );
@@ -104,22 +112,22 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
 }
 
 class _HomePage extends StatefulWidget {
-  final String serverUrl;
   final SignalClient signalClient;
   final ConnectionManager connectionManager;
+  final String httpUrl;
+  final String serverUrl;
+  final String relayUrl;
   final ValueChanged<String> onServerUrlChanged;
   final ValueChanged<String> onRelayUrlChanged;
-  final String currentServerUrl;
-  final String currentRelayUrl;
 
   const _HomePage({
-    required this.serverUrl,
     required this.signalClient,
     required this.connectionManager,
+    required this.httpUrl,
+    required this.serverUrl,
+    required this.relayUrl,
     required this.onServerUrlChanged,
     required this.onRelayUrlChanged,
-    required this.currentServerUrl,
-    required this.currentRelayUrl,
   });
 
   @override
@@ -128,18 +136,44 @@ class _HomePage extends StatefulWidget {
 
 class _HomePageState extends State<_HomePage> {
   int _currentIndex = 0;
+  late DeviceListProvider _deviceProvider;
+
+  @override
+  void initState() {
+    super.initState();
+    _deviceProvider = DeviceListProvider(baseUrl: widget.httpUrl);
+    // Auto-refresh device list on start
+    _deviceProvider.refresh();
+  }
+
+  @override
+  void didUpdateWidget(_HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Recreate provider when server URL changes
+    if (oldWidget.httpUrl != widget.httpUrl) {
+      _deviceProvider.dispose();
+      _deviceProvider = DeviceListProvider(baseUrl: widget.httpUrl);
+      _deviceProvider.refresh();
+    }
+  }
+
+  @override
+  void dispose() {
+    _deviceProvider.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
       DeviceListScreen(
-        serverUrl: widget.serverUrl,
         signalClient: widget.signalClient,
         connectionManager: widget.connectionManager,
+        deviceProvider: _deviceProvider,
       ),
       SettingsScreen(
-        currentServerUrl: widget.currentServerUrl,
-        currentRelayUrl: widget.currentRelayUrl,
+        currentServerUrl: widget.serverUrl,
+        currentRelayUrl: widget.relayUrl,
         onServerUrlChanged: widget.onServerUrlChanged,
         onRelayUrlChanged: widget.onRelayUrlChanged,
       ),
@@ -154,6 +188,10 @@ class _HomePageState extends State<_HomePage> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           setState(() => _currentIndex = index);
+          // Refresh device list when switching to devices tab
+          if (index == 0) {
+            _deviceProvider.refresh();
+          }
         },
         destinations: const [
           NavigationDestination(

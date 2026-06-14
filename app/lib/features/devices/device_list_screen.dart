@@ -2,9 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../core/api/device_api.dart';
 import '../../core/connection/connection_manager.dart';
 import '../../core/models/device.dart';
 import '../../core/signal/signal_client.dart';
@@ -12,15 +10,15 @@ import '../terminal/terminal_screen.dart';
 import 'device_list_provider.dart';
 
 class DeviceListScreen extends StatefulWidget {
-  final String serverUrl;
   final SignalClient signalClient;
   final ConnectionManager connectionManager;
+  final DeviceListProvider deviceProvider;
 
   const DeviceListScreen({
     super.key,
-    required this.serverUrl,
     required this.signalClient,
     required this.connectionManager,
+    required this.deviceProvider,
   });
 
   @override
@@ -28,124 +26,187 @@ class DeviceListScreen extends StatefulWidget {
 }
 
 class _DeviceListScreenState extends State<DeviceListScreen> {
-  late DeviceListProvider _provider;
-  late DeviceApi _api;
+  SignalConnectionState _signalState = SignalConnectionState.disconnected;
 
   @override
   void initState() {
     super.initState();
-    _api = DeviceApi(baseUrl: widget.serverUrl);
-    _provider = DeviceListProvider(serverUrl: widget.serverUrl);
-    _provider.refresh();
+    _signalState = widget.signalClient.state;
+    widget.signalClient.addStateListener(_onSignalStateChanged);
+    _connectSignalIfNeeded();
+  }
 
-    // Auto-refresh every 5 seconds
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 5));
-      if (mounted) {
-        _provider.refresh();
-        return true;
-      }
-      return false;
-    });
+  void _onSignalStateChanged(SignalConnectionState state) {
+    if (mounted) {
+      setState(() => _signalState = state);
+    }
   }
 
   @override
   void dispose() {
-    _provider.dispose();
-    _api.dispose();
+    widget.signalClient.removeStateListener(_onSignalStateChanged);
     super.dispose();
+  }
+
+  Future<void> _connectSignalIfNeeded() async {
+    if (widget.signalClient.state == SignalConnectionState.disconnected ||
+        widget.signalClient.state == SignalConnectionState.error) {
+      try {
+        await widget.signalClient.connect();
+        widget.signalClient.register(
+          deviceId: 'app-${DateTime.now().millisecondsSinceEpoch}',
+          deviceName: 'CloudBridge App',
+          platform: 'web',
+          version: '0.1.0',
+        );
+        widget.signalClient.startHeartbeat();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('信令连接失败: $e')),
+          );
+        }
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: _provider,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('云桥 CloudBridge'),
-          centerTitle: true,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => _navigateToSettings(context),
-            ),
-          ],
-        ),
-        body: Consumer<DeviceListProvider>(
-          builder: (context, provider, child) {
-            if (provider.isLoading && provider.devices.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
-            }
+    return ListenableBuilder(
+      listenable: widget.deviceProvider,
+      builder: (context, _) {
+        final provider = widget.deviceProvider;
 
-            if (provider.error != null) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                    const SizedBox(height: 16),
-                    Text('连接失败', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    Text(provider.error!, style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: provider.refresh,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('重试'),
-                    ),
-                  ],
-                ),
-              );
-            }
+        // Signal connection color
+        final signalColor = switch (_signalState) {
+          SignalConnectionState.registered => Colors.green,
+          SignalConnectionState.connected => Colors.orange,
+          SignalConnectionState.connecting => Colors.orange,
+          _ => Colors.grey,
+        };
 
-            if (provider.devices.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.devices, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    Text('没有在线设备', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    Text('请确保 Agent 已启动并注册到服务器',
-                        style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: provider.refresh,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('刷新'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            return RefreshIndicator(
-              onRefresh: provider.refresh,
-              child: ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: provider.devices.length,
-                itemBuilder: (context, index) {
-                  final device = provider.devices[index];
-                  return _DeviceCard(
-                    device: device,
-                    onTap: () => _connectToDevice(context, device),
-                  );
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('云桥 CloudBridge'),
+            centerTitle: true,
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Icon(Icons.circle, size: 12, color: signalColor),
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () {
+                  provider.refresh();
+                  _connectSignalIfNeeded();
                 },
               ),
-            );
-          },
+            ],
+          ),
+          body: _buildBody(provider),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {
+              provider.refresh();
+              _connectSignalIfNeeded();
+            },
+            child: const Icon(Icons.refresh),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBody(DeviceListProvider provider) {
+    if (provider.isLoading && provider.devices.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (provider.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text('连接失败', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(
+                provider.error!,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '请检查设置中的服务器地址是否正确',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  provider.refresh();
+                  _connectSignalIfNeeded();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: _provider.refresh,
-          child: const Icon(Icons.refresh),
+      );
+    }
+
+    if (provider.devices.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.devices, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text('没有在线设备', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text(
+                '请确保 Agent 已启动并注册到服务器\n在设置中配置正确的服务器地址',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  provider.refresh();
+                  _connectSignalIfNeeded();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('刷新'),
+              ),
+            ],
+          ),
         ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        provider.refresh();
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: provider.devices.length,
+        itemBuilder: (context, index) {
+          final device = provider.devices[index];
+          return _DeviceCard(
+            device: device,
+            onTap: () => _connectToDevice(context, device),
+          );
+        },
       ),
     );
   }
 
   void _connectToDevice(BuildContext context, Device device) {
-    // Navigate to terminal screen with connection
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -157,10 +218,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
         ),
       ),
     );
-  }
-
-  void _navigateToSettings(BuildContext context) {
-    // TODO: Navigate to settings screen
   }
 }
 
@@ -181,7 +238,6 @@ class _DeviceCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // Platform icon
               CircleAvatar(
                 radius: 24,
                 backgroundColor: device.online
@@ -193,7 +249,6 @@ class _DeviceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              // Device info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,7 +272,6 @@ class _DeviceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Status indicator
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [

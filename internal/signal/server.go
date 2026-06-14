@@ -84,6 +84,20 @@ func (s *Server) SessionManager() *SessionManager {
 	return s.sessionManager
 }
 
+// corsMiddleware adds CORS headers for browser (web app) access.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Start begins listening for WebSocket connections.
 // If apiHandler is provided, it will be called to register REST API routes.
 func (s *Server) Start(apiRegister func(mux *http.ServeMux)) error {
@@ -103,7 +117,7 @@ func (s *Server) Start(apiRegister func(mux *http.ServeMux)) error {
 
 	s.httpServer = &http.Server{
 		Addr:    s.config.Addr,
-		Handler: mux,
+		Handler: corsMiddleware(mux),
 	}
 
 	slog.Info("signal server starting", "addr", s.config.Addr, "path", s.config.Path)
