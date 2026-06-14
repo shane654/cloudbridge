@@ -8,6 +8,11 @@ import 'features/devices/device_list_screen.dart';
 import 'features/devices/device_list_provider.dart';
 import 'features/settings/settings_screen.dart';
 
+/// Default ports for CloudBridge services
+const int kSignalPort = 10980;
+const int kRelayPort = 10988;
+const int kWebPort = 10990;
+
 void main() {
   runApp(const CloudBridgeApp());
 }
@@ -20,9 +25,9 @@ class CloudBridgeApp extends StatefulWidget {
 }
 
 class _CloudBridgeAppState extends State<CloudBridgeApp> {
-  String _serverUrl = 'ws://192.168.1.100:10980/signal';
-  String _relayUrl = '192.168.1.100:10988';
-  String _httpUrl = 'http://192.168.1.100:10980';
+  String _serverUrl = '';
+  String _relayUrl = '';
+  String _httpUrl = '';
   late SignalClient _signalClient;
   late ConnectionManager _connectionManager;
   bool _initialized = false;
@@ -35,21 +40,33 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
 
   Future<void> _initSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _serverUrl = prefs.getString('server_url') ?? _serverUrl;
-      _relayUrl = prefs.getString('relay_url') ?? _relayUrl;
-      _httpUrl = prefs.getString('http_url') ?? _httpUrl;
-    });
 
-    _signalClient = SignalClient(serverUrl: _serverUrl);
+    String serverUrl = prefs.getString('server_url') ?? '';
+    String relayUrl = prefs.getString('relay_url') ?? '';
+    String httpUrl = prefs.getString('http_url') ?? '';
+
+    // Development: use hardcoded server IP
+    // TODO: make configurable via settings in production
+    if (serverUrl.isEmpty) {
+      const serverHost = '54.39.49.63';
+      serverUrl = 'ws://$serverHost:$kSignalPort/signal';
+      relayUrl = '$serverHost:$kRelayPort';
+      httpUrl = 'http://$serverHost:$kSignalPort';
+    }
+
+    _signalClient = SignalClient(serverUrl: serverUrl);
     _connectionManager = ConnectionManager(signalClient: _signalClient);
-    _connectionManager.setRelayAddress(_relayUrl);
+    _connectionManager.setRelayAddress(relayUrl);
 
-    setState(() => _initialized = true);
+    setState(() {
+      _serverUrl = serverUrl;
+      _relayUrl = relayUrl;
+      _httpUrl = httpUrl;
+      _initialized = true;
+    });
   }
 
   void _onServerUrlChanged(String url) {
-    // Derive HTTP URL from WebSocket URL
     String httpUrl = url
         .replaceFirst('ws://', 'http://')
         .replaceFirst('wss://', 'https://')
@@ -60,7 +77,6 @@ class _CloudBridgeAppState extends State<CloudBridgeApp> {
       _httpUrl = httpUrl;
     });
 
-    // Reconnect signal client with new URL
     _signalClient.disconnectClient();
     _signalClient = SignalClient(serverUrl: _serverUrl);
     _connectionManager = ConnectionManager(signalClient: _signalClient);
@@ -142,14 +158,12 @@ class _HomePageState extends State<_HomePage> {
   void initState() {
     super.initState();
     _deviceProvider = DeviceListProvider(baseUrl: widget.httpUrl);
-    // Auto-refresh device list on start
     _deviceProvider.refresh();
   }
 
   @override
   void didUpdateWidget(_HomePage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Recreate provider when server URL changes
     if (oldWidget.httpUrl != widget.httpUrl) {
       _deviceProvider.dispose();
       _deviceProvider = DeviceListProvider(baseUrl: widget.httpUrl);
@@ -188,7 +202,6 @@ class _HomePageState extends State<_HomePage> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           setState(() => _currentIndex = index);
-          // Refresh device list when switching to devices tab
           if (index == 0) {
             _deviceProvider.refresh();
           }
