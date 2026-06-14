@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/connection/connection_manager.dart';
@@ -40,6 +41,10 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
   void _onSignalStateChanged(SignalConnectionState state) {
     if (mounted) {
       setState(() => _signalState = state);
+      // Refresh device list when signal connects
+      if (state == SignalConnectionState.registered) {
+        widget.deviceProvider.refresh();
+      }
     }
   }
 
@@ -215,6 +220,31 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
   }
 
   void _connectToDevice(BuildContext context, Device device) {
+    if (kIsWeb) {
+      // Web platform doesn't support TCP relay connections
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('远程终端'),
+          content: const Text(
+            'Web 端暂不支持远程终端连接。\n\n'
+            '请下载 Android App 获取完整功能：\n'
+            '• 远程终端\n'
+            '• Shell 命令执行\n'
+            '• 完整中继连接\n\n'
+            'GitHub: github.com/shane654/cloudbridge',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(

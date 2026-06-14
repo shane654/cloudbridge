@@ -74,17 +74,30 @@ func (h *Hub) UnregisterClient(c *Client) {
 }
 
 // RegisterDevice records an agent's device info.
+// If the device already exists (same device ID), it updates the info and
+// replaces the old client connection instead of creating a duplicate.
 func (h *Hub) RegisterDevice(client *Client, info *DeviceInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	info.Registered = time.Now()
+	// If device already registered, update it instead of duplicating
+	if existing, ok := h.devices[info.ID]; ok {
+		// Clean up old client association
+		if oldClient, oldOk := h.byDevice[info.ID]; oldOk {
+			oldClient.DeviceID = ""
+		}
+		// Preserve original registration time
+		info.Registered = existing.Registered
+		slog.Info("device re-registered", "device_id", info.ID, "name", info.Name, "platform", info.Platform)
+	} else {
+		info.Registered = time.Now()
+		slog.Info("device registered", "device_id", info.ID, "name", info.Name, "platform", info.Platform)
+	}
+
 	info.LastSeen = time.Now()
 	h.devices[info.ID] = info
 	h.byDevice[info.ID] = client
 	client.DeviceID = info.ID
-
-	slog.Info("device registered", "device_id", info.ID, "name", info.Name, "platform", info.Platform)
 }
 
 // UpdateHeartbeat refreshes the last-seen timestamp for a device.

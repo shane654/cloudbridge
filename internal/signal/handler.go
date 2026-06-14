@@ -62,15 +62,21 @@ func (h *Handler) handleRegister(client *Client, data json.RawMessage) error {
 		return h.sendError(client, "invalid_register", "invalid register payload")
 	}
 
-	slog.Info("device registering", "device_id", reg.DeviceID, "name", reg.DeviceName, "platform", reg.Platform)
+	// Only register as a device if this is an agent connection.
+	// App connections are just observers and don't appear in the device list.
+	if client.IsAgent {
+		slog.Info("device registering", "device_id", reg.DeviceID, "name", reg.DeviceName, "platform", reg.Platform)
 
-	h.hub.RegisterDevice(client, &DeviceInfo{
-		ID:        reg.DeviceID,
-		Name:      reg.DeviceName,
-		Platform:  string(reg.Platform),
-		Version:   reg.Version,
-		PublicKey: reg.PublicKey,
-	})
+		h.hub.RegisterDevice(client, &DeviceInfo{
+			ID:        reg.DeviceID,
+			Name:      reg.DeviceName,
+			Platform:  string(reg.Platform),
+			Version:   reg.Version,
+			PublicKey: reg.PublicKey,
+		})
+	} else {
+		slog.Info("app client registered (not a device)", "device_id", reg.DeviceID, "client_id", client.ID)
+	}
 
 	ack, err := protocol.Encode(protocol.MsgTypeRegisterAck, protocol.RegisterAckPayload{
 		Token:     "token-" + reg.DeviceID, // TODO: generate real JWT token
