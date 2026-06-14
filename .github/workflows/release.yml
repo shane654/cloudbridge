@@ -10,26 +10,21 @@ permissions:
 
 jobs:
   build-server:
-    name: Build Server & Agent
+    name: Build Server & Agent (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: linux
             goarch: amd64
-            suffix: ''
           - goos: linux
             goarch: arm64
-            suffix: '-arm64'
           - goos: darwin
             goarch: amd64
-            suffix: '-macos-amd64'
           - goos: darwin
             goarch: arm64
-            suffix: '-macos-arm64'
           - goos: windows
             goarch: amd64
-            suffix: '.exe'
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +38,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           VERSION=${GITHUB_REF_NAME}
-          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-server${{ matrix.suffix }} ./cmd/server
+          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-server ./cmd/server
 
       - name: Build agent
         env:
@@ -51,14 +46,20 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           VERSION=${GITHUB_REF_NAME}
-          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-agent${{ matrix.suffix }} ./cmd/agent
+          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-agent ./cmd/agent
+
+      - name: Rename for platform
+        run: |
+          TARGET="${{ matrix.goos }}-${{ matrix.goarch }}"
+          mv cloudbridge-server cloudbridge-server-${TARGET}
+          mv cloudbridge-agent cloudbridge-agent-${TARGET}
 
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            cloudbridge-server${{ matrix.suffix }}
-            cloudbridge-agent${{ matrix.suffix }}
+            cloudbridge-server-${{ matrix.goos }}-${{ matrix.goarch }}
+            cloudbridge-agent-${{ matrix.goos }}-${{ matrix.goarch }}
 
   build-android:
     name: Build Android APK
@@ -98,23 +99,24 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f | head -30
-
       - name: Rename artifacts for release
         run: |
           mkdir -p release
-          # Server & Agent binaries
-          cp artifacts/server-linux-amd64/cloudbridge-server release/cloudbridge-server-linux-amd64
-          cp artifacts/server-linux-amd64/cloudbridge-agent release/cloudbridge-agent-linux-amd64
-          cp artifacts/server-linux-arm64/cloudbridge-server release/cloudbridge-server-linux-arm64
-          cp artifacts/server-linux-arm64/cloudbridge-agent release/cloudbridge-agent-linux-arm64
-          cp artifacts/server-darwin-amd64/cloudbridge-server release/cloudbridge-server-macos-amd64
-          cp artifacts/server-darwin-amd64/cloudbridge-agent release/cloudbridge-agent-macos-amd64
-          cp artifacts/server-darwin-arm64/cloudbridge-server release/cloudbridge-server-macos-arm64
-          cp artifacts/server-darwin-arm64/cloudbridge-agent release/cloudbridge-agent-macos-arm64
-          cp artifacts/server-windows-amd64/cloudbridge-server.exe release/cloudbridge-server-windows-amd64.exe
-          cp artifacts/server-windows-amd64/cloudbridge-agent.exe release/cloudbridge-agent-windows-amd64.exe
+          # Linux amd64
+          cp artifacts/server-linux-amd64/cloudbridge-server-linux-amd64 release/
+          cp artifacts/server-linux-amd64/cloudbridge-agent-linux-amd64 release/
+          # Linux arm64
+          cp artifacts/server-linux-arm64/cloudbridge-server-linux-arm64 release/
+          cp artifacts/server-linux-arm64/cloudbridge-agent-linux-arm64 release/
+          # macOS amd64
+          cp artifacts/server-darwin-amd64/cloudbridge-server-darwin-amd64 release/
+          cp artifacts/server-darwin-amd64/cloudbridge-agent-darwin-amd64 release/
+          # macOS arm64
+          cp artifacts/server-darwin-arm64/cloudbridge-server-darwin-arm64 release/
+          cp artifacts/server-darwin-arm64/cloudbridge-agent-darwin-arm64 release/
+          # Windows amd64
+          cp artifacts/server-windows-amd64/cloudbridge-server-windows-amd64 release/
+          cp artifacts/server-windows-amd64/cloudbridge-agent-windows-amd64 release/
           # Android APK
           cp artifacts/android-apk/app-release.apk release/cloudbridge-android.apk
 
@@ -128,19 +130,28 @@ jobs:
             ### 下载
             | 文件 | 说明 |
             |------|------|
-            | `cloudbridge-android.apk` | Android 客户端 |
-            | `cloudbridge-server-linux-amd64` | 服务器 (Linux x64) |
-            | `cloudbridge-server-linux-arm64` | 服务器 (Linux ARM64) |
-            | `cloudbridge-server-macos-amd64` | 服务器 (macOS Intel) |
-            | `cloudbridge-server-macos-arm64` | 服务器 (macOS Apple Silicon) |
-            | `cloudbridge-server-windows-amd64.exe` | 服务器 (Windows) |
-            | `cloudbridge-agent-linux-amd64` | Agent (Linux x64) |
-            | `cloudbridge-agent-linux-arm64` | Agent (Linux ARM64) |
-            | `cloudbridge-agent-macos-amd64` | Agent (macOS Intel) |
-            | `cloudbridge-agent-macos-arm64` | Agent (macOS Apple Silicon) |
-            | `cloudbridge-agent-windows-amd64.exe` | Agent (Windows) |
+            | `cloudbridge-android.apk` | 📱 Android 客户端 |
+            | `cloudbridge-server-linux-amd64` | 🖥️ 服务器 (Linux x64) |
+            | `cloudbridge-server-linux-arm64` | 🖥️ 服务器 (Linux ARM64) |
+            | `cloudbridge-server-darwin-amd64` | 🍎 服务器 (macOS Intel) |
+            | `cloudbridge-server-darwin-arm64` | 🍎 服务器 (macOS Apple Silicon) |
+            | `cloudbridge-server-windows-amd64` | 🪟 服务器 (Windows) |
+            | `cloudbridge-agent-linux-amd64` | 🤖 Agent (Linux x64) |
+            | `cloudbridge-agent-linux-arm64` | 🤖 Agent (Linux ARM64) |
+            | `cloudbridge-agent-darwin-amd64` | 🤖 Agent (macOS Intel) |
+            | `cloudbridge-agent-darwin-arm64` | 🤖 Agent (macOS Apple Silicon) |
+            | `cloudbridge-agent-windows-amd64` | 🤖 Agent (Windows) |
 
             ### 端口
             - Signal: 10980 (WebSocket)
             - STUN: 10978 (UDP)
             - Relay: 10988 (TCP)
+
+            ### 快速开始
+            ```bash
+            # 启动服务器
+            ./cloudbridge-server --debug
+
+            # 启动Agent
+            ./cloudbridge-agent --server ws://YOUR_SERVER:10980/signal --name my-device
+            ```
