@@ -20,9 +20,9 @@ class CloudBridgeApp extends StatefulWidget {
 }
 
 class _CloudBridgeAppState extends State<CloudBridgeApp> {
-  String _serverUrl = 'ws://54.39.49.63:10985/signal';
-  String _relayUrl = '54.39.49.63:10988';
-  String _httpUrl = 'http://54.39.49.63:10985';
+  String _serverUrl = 'ws://192.168.1.100:10980/signal';
+  String _relayUrl = '192.168.1.100:10988';
+  String _httpUrl = 'http://192.168.1.100:10980';
   late SignalClient _signalClient;
   late ConnectionManager _connectionManager;
   bool _initialized = false;

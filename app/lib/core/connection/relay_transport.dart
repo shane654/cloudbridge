@@ -214,6 +214,6 @@ class RelayTransport {
 
   int _parsePort(String addr) {
     final parts = addr.split(':');
-    return parts.length > 1 ? int.parse(parts[1]) : 7788;
+    return parts.length > 1 ? int.parse(parts[1]) : 10988;
   }
 }
