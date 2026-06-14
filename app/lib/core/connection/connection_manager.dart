@@ -2,6 +2,8 @@
 /// Signal registration → Connect request → Transport negotiation → Data channel.
 library;
 
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 
 import '../protocol/frame.dart' show StreamID;
@@ -18,6 +20,7 @@ class ConnectionManager {
   String? _activeSessionId;
   RelayTransport? _relayTransport;
   String? _relayAddress;
+  String? _lastError;
 
   final List<void Function(ConnectionState)> _stateListeners = [];
   final List<void Function(String, bool)> _connectionResultListeners = [];
@@ -30,6 +33,7 @@ class ConnectionManager {
   ConnectionState get state => _state;
   String? get activeSessionId => _activeSessionId;
   RelayTransport? get relayTransport => _relayTransport;
+  String? get lastError => _lastError;
 
   void addStateListener(void Function(ConnectionState) listener) {
     _stateListeners.add(listener);
@@ -50,6 +54,7 @@ class ConnectionManager {
 
   /// Connect to a remote device.
   void connectToDevice(String deviceId, List<String> protocols) {
+    _lastError = null;
     _activeSessionId = 'ses-${const Uuid().v4().substring(0, 8)}';
     _setState(ConnectionState.connecting);
 
@@ -68,6 +73,7 @@ class ConnectionManager {
     _relayTransport?.disconnect();
     _relayTransport = null;
     _activeSessionId = null;
+    _lastError = null;
     _setState(ConnectionState.disconnected);
   }
 
@@ -85,12 +91,16 @@ class ConnectionManager {
       case MsgType.disconnect:
         _handleDisconnect(message.data);
         break;
+      case MsgType.error:
+        _handleError(message.data);
+        break;
     }
   }
 
   void _handleSignalState(SignalConnectionState signalState) {
     if (signalState == SignalConnectionState.disconnected ||
         signalState == SignalConnectionState.error) {
+      _lastError = 'Signal connection lost';
       _setState(ConnectionState.error);
     }
   }
@@ -109,6 +119,7 @@ class ConnectionManager {
         relayEndpoint: _relayAddress ?? 'localhost:10988',
       );
     } else {
+      _lastError = response.reason ?? 'Connection rejected';
       _setState(ConnectionState.error);
       for (final listener in _connectionResultListeners) {
         listener(response.sessionId, false);
@@ -139,6 +150,13 @@ class ConnectionManager {
     _setState(ConnectionState.disconnected);
   }
 
+  void _handleError(Map<String, dynamic>? data) {
+    if (data == null) return;
+    final error = ErrorPayload.fromJson(data);
+    _lastError = error.message;
+    _setState(ConnectionState.error);
+  }
+
   Future<void> _connectToRelay() async {
     if (_activeSessionId == null || _relayAddress == null) return;
 
@@ -159,6 +177,7 @@ class ConnectionManager {
 
       _setState(ConnectionState.connected);
     } catch (e) {
+      _lastError = 'Relay connection failed: $e';
       _setState(ConnectionState.error);
     }
   }

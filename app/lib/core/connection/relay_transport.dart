@@ -1,13 +1,18 @@
 /// Relay transport client for CloudBridge.
 /// Connects to the relay server via TCP, performs binary handshake,
 /// and sends/receives frames.
+///
+/// On web platform, TCP is not available. connect() will throw
+/// UnsupportedError. The app should handle this gracefully.
 library;
 
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../protocol/frame.dart' show Frame, FrameType, FrameReadResult, StreamID, frameHeaderSize, maxPayloadSize, tryReadFrame;
+import 'relay_transport_socket.dart' if (dart.library.html) 'relay_transport_web.dart' if (dart.library.io) 'relay_transport_io.dart';
 
 /// Relay handshake constants (aligned with Go's internal/relay/handshake.go)
 const String _handshakeMagic = 'CBLD';
@@ -21,7 +26,7 @@ class RelayTransport {
   final String sessionId;
   final bool isInitiator;
 
-  Socket? _socket;
+  dynamic _socket;
   StreamSubscription<Uint8List>? _subscription;
   final _frameController = StreamController<Frame>.broadcast();
   final _buffer = BytesBuilder();
@@ -43,11 +48,20 @@ class RelayTransport {
   Future<void> connect() async {
     if (_connected) return;
 
-    _socket = await Socket.connect(
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'TCP relay is not supported on web. Use the Android/iOS app.',
+      );
+    }
+
+    final stream = await connectSocket(
       _parseHost(address),
       _parsePort(address),
       timeout: const Duration(seconds: 10),
     );
+
+    // Cast back to Socket for native platform operations
+    _socket = stream;
 
     // Perform handshake
     _writeHandshake();
@@ -58,8 +72,9 @@ class RelayTransport {
     _connected = true;
 
     // Start reading frames
-    _subscription = _socket!.listen(
-      _onData,
+    _subscription = socketListen(
+      _socket,
+      onData: _onData,
       onError: _onError,
       onDone: _onDone,
     );
@@ -68,7 +83,7 @@ class RelayTransport {
   /// Send a frame over the relay connection.
   void sendFrame(Frame frame) {
     if (!_connected || _socket == null) return;
-    _socket!.add(frame.encode());
+    socketAdd(_socket, frame.encode());
   }
 
   /// Send raw data on a specific stream.
@@ -105,8 +120,10 @@ class RelayTransport {
   Future<void> disconnect() async {
     _connected = false;
     await _subscription?.cancel();
-    _socket?.destroy();
-    _socket = null;
+    if (_socket != null) {
+      socketDestroy(_socket);
+      _socket = null;
+    }
     if (!_frameController.isClosed) {
       await _frameController.close();
     }
@@ -116,23 +133,17 @@ class RelayTransport {
     final idBytes = Uint8List.fromList(sessionId.codeUnits);
     final buf = BytesBuilder();
 
-    // Magic (4 bytes)
     buf.add(Uint8List.fromList(_handshakeMagic.codeUnits));
-    // Version (1 byte)
     buf.addByte(_handshakeVersion);
-    // Session ID length (2 bytes, big-endian)
     buf.addByte((idBytes.length >> 8) & 0xFF);
     buf.addByte(idBytes.length & 0xFF);
-    // Session ID
     buf.add(idBytes);
-    // Peer type (1 byte)
     buf.addByte(isInitiator ? _peerTypeInitiator : _peerTypeResponder);
 
-    _socket!.add(buf.takeBytes());
+    socketAdd(_socket, Uint8List.fromList(buf.takeBytes()));
   }
 
   Future<void> _readHandshakeAck() async {
-    // Read 5 bytes: magic(4) + status(1)
     final header = await _readExactly(5);
 
     final magic = String.fromCharCodes(header.sublist(0, 4));
@@ -142,11 +153,9 @@ class RelayTransport {
 
     final status = header[4];
     if (status == 0x00) {
-      // OK
       return;
     }
 
-    // Error: read error message
     final msgLenBuf = await _readExactly(2);
     final msgLen = (msgLenBuf[0] << 8) | msgLenBuf[1];
     final msgBuf = await _readExactly(msgLen);
@@ -161,8 +170,7 @@ class RelayTransport {
       if (_socket == null) {
         throw Exception('Socket disconnected during handshake');
       }
-      // Wait for data
-      final chunk = await _socket!.first;
+      final chunk = await socketFirst(_socket);
       data.addAll(chunk);
     }
     return Uint8List.fromList(data.sublist(0, count));
@@ -177,12 +185,9 @@ class RelayTransport {
     while (true) {
       final result = tryReadFrame(Uint8List.fromList(_buffer.takeBytes()));
       if (result == null) {
-        // Not enough data, wait for more
-        // (buffer was consumed by takeBytes, we need to put it back)
         break;
       }
 
-      // Re-add remaining bytes to buffer
       final allBytes = _buffer.takeBytes();
       final remaining = allBytes.sublist(result.consumedBytes);
       if (remaining.isNotEmpty) {

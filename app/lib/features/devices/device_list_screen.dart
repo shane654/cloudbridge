@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/connection/connection_manager.dart';
 import '../../core/models/device.dart';
@@ -53,8 +54,15 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
         widget.signalClient.state == SignalConnectionState.error) {
       try {
         await widget.signalClient.connect();
+        // Use a persistent device ID so we don't create duplicates on refresh
+        final prefs = await SharedPreferences.getInstance();
+        var appId = prefs.getString('app_device_id');
+        if (appId == null) {
+          appId = 'app-${DateTime.now().millisecondsSinceEpoch}';
+          await prefs.setString('app_device_id', appId);
+        }
         widget.signalClient.register(
-          deviceId: 'app-${DateTime.now().millisecondsSinceEpoch}',
+          deviceId: appId,
           deviceName: 'CloudBridge App',
           platform: 'web',
           version: '0.1.0',

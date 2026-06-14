@@ -73,7 +73,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
         _addOutput('\nRelay connected, opening shell...');
         break;
       case cb.ConnectionState.error:
-        _addOutput('\nConnection error. Please try again.');
+        final error = widget.connectionManager.lastError ?? 'Unknown error';
+        _addOutput('\nConnection error: $error');
+        if (error.contains('not supported on web')) {
+          _addOutput('\n💡 Web 端暂不支持远程终端。');
+          _addOutput('请使用 Android/iOS App 获取完整功能。');
+        }
         break;
       case cb.ConnectionState.disconnected:
         _addOutput('\nDisconnected.');
