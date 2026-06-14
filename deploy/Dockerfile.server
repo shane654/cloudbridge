@@ -1,0 +1,33 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build with version info
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-X main.version=${VERSION}" \
+    -o /cloudbridge-server ./cmd/server
+
+# Runtime stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /cloudbridge-server /usr/local/bin/cloudbridge-server
+
+# Default configuration
+ENV SIGNAL_ADDR=:10980
+ENV STUN_ADDR=:10978
+ENV RELAY_ADDR=:10988
+
+EXPOSE 10980 10978/udp 10988
+
+ENTRYPOINT ["cloudbridge-server"]

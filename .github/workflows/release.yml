@@ -1,0 +1,146 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-server:
+    name: Build Server & Agent
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+          - goos: linux
+            goarch: arm64
+            suffix: '-arm64'
+          - goos: darwin
+            goarch: amd64
+            suffix: '-macos-amd64'
+          - goos: darwin
+            goarch: arm64
+            suffix: '-macos-arm64'
+          - goos: windows
+            goarch: amd64
+            suffix: '.exe'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-server${{ matrix.suffix }} ./cmd/server
+
+      - name: Build agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          go build -ldflags "-X main.version=${VERSION}" -o cloudbridge-agent${{ matrix.suffix }} ./cmd/agent
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            cloudbridge-server${{ matrix.suffix }}
+            cloudbridge-agent${{ matrix.suffix }}
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: app
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+
+  release:
+    name: Create Release
+    needs: [build-server, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -30
+
+      - name: Rename artifacts for release
+        run: |
+          mkdir -p release
+          # Server & Agent binaries
+          cp artifacts/server-linux-amd64/cloudbridge-server release/cloudbridge-server-linux-amd64
+          cp artifacts/server-linux-amd64/cloudbridge-agent release/cloudbridge-agent-linux-amd64
+          cp artifacts/server-linux-arm64/cloudbridge-server release/cloudbridge-server-linux-arm64
+          cp artifacts/server-linux-arm64/cloudbridge-agent release/cloudbridge-agent-linux-arm64
+          cp artifacts/server-darwin-amd64/cloudbridge-server release/cloudbridge-server-macos-amd64
+          cp artifacts/server-darwin-amd64/cloudbridge-agent release/cloudbridge-agent-macos-amd64
+          cp artifacts/server-darwin-arm64/cloudbridge-server release/cloudbridge-server-macos-arm64
+          cp artifacts/server-darwin-arm64/cloudbridge-agent release/cloudbridge-agent-macos-arm64
+          cp artifacts/server-windows-amd64/cloudbridge-server.exe release/cloudbridge-server-windows-amd64.exe
+          cp artifacts/server-windows-amd64/cloudbridge-agent.exe release/cloudbridge-agent-windows-amd64.exe
+          # Android APK
+          cp artifacts/android-apk/app-release.apk release/cloudbridge-android.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            ## 云桥 CloudBridge ${{ github.ref_name }}
+
+            ### 下载
+            | 文件 | 说明 |
+            |------|------|
+            | `cloudbridge-android.apk` | Android 客户端 |
+            | `cloudbridge-server-linux-amd64` | 服务器 (Linux x64) |
+            | `cloudbridge-server-linux-arm64` | 服务器 (Linux ARM64) |
+            | `cloudbridge-server-macos-amd64` | 服务器 (macOS Intel) |
+            | `cloudbridge-server-macos-arm64` | 服务器 (macOS Apple Silicon) |
+            | `cloudbridge-server-windows-amd64.exe` | 服务器 (Windows) |
+            | `cloudbridge-agent-linux-amd64` | Agent (Linux x64) |
+            | `cloudbridge-agent-linux-arm64` | Agent (Linux ARM64) |
+            | `cloudbridge-agent-macos-amd64` | Agent (macOS Intel) |
+            | `cloudbridge-agent-macos-arm64` | Agent (macOS Apple Silicon) |
+            | `cloudbridge-agent-windows-amd64.exe` | Agent (Windows) |
+
+            ### 端口
+            - Signal: 10980 (WebSocket)
+            - STUN: 10978 (UDP)
+            - Relay: 10988 (TCP)

@@ -1,0 +1,44 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Flutter / Dart
+app/build/
+app/.dart_tool/
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/pubspec.lock
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/Flutter/App.framework/
+**/Flutter/Flutter.framework/
+**/Flutter/Flutter.podspec
+**/Flutter/Generated.xcconfig
+**/Flutter/ephemeral/
+**/Flutter/app.flx
+**/Flutter/app.zip
+**/Flutter/flutter_assets/
+**/Flutter/flutter_export_environment.sh
+**/ServiceDefinitions.json
+**/Runner/GeneratedPluginRegistrant.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local

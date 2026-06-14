@@ -1,0 +1,30 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build with version info
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-X main.version=${VERSION}" \
+    -o /cloudbridge-agent ./cmd/agent
+
+# Runtime stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /cloudbridge-agent /usr/local/bin/cloudbridge-agent
+
+# Default configuration
+ENV SERVER_URL=ws://cloudbridge-server:10980/signal
+ENV DEVICE_NAME=cloudbridge-agent
+
+ENTRYPOINT ["cloudbridge-agent"]

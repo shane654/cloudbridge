@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  # CloudBridge Server - Signal, STUN, and Relay services
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+      args:
+        VERSION: "${VERSION:-dev}"
+    container_name: cloudbridge-server
+    ports:
+      - "10980:10980"    # Signal (WebSocket)
+      - "10978:10978/udp"  # STUN (UDP)
+      - "10988:10988"    # Relay (TCP)
+    environment:
+      - SIGNAL_ADDR=:10980
+      - STUN_ADDR=:10978
+      - RELAY_ADDR=:10988
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:10980/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # CloudBridge Agent - Runs on remote devices
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+      args:
+        VERSION: "${VERSION:-dev}"
+    container_name: cloudbridge-agent
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      - SERVER_URL=ws://server:10980/signal
+      - DEVICE_NAME=dev-agent
+    restart: unless-stopped
